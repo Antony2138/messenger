@@ -10,7 +10,7 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import dsa
 from cryptography.hazmat.primitives import serialization
 from .utils import generator, rsa_encrypt, caesar_cipher_encrypt, aes_encrypt, aes_decrypt, caesar_cipher_decrypt, \
-    rsa_decrypt
+    rsa_decrypt, generate_rsa_keys
 
 # Create your views here.
 
@@ -51,46 +51,31 @@ def encrypt(request):
 
 @csrf_exempt
 def generate_keys(request):
+    global private_key, public_key, model, caesar_key, aes_key
     if request.method == 'POST':
         encryption_method = request.POST.get('method')
 
         if encryption_method == 'caesar':
-            # Простой шифр Цезаря: ключ - смещение
-            key = random.randint(3, 20)  # Можно сделать динамическим
-            return JsonResponse({'method': 'caesar', 'key': key})
+            caesar_key = generator(encryption_method)
+            return JsonResponse({
+                'method': encryption_method,
+                'status': "caesar_key generated successfully",
+            })
 
         elif encryption_method == 'aes':
             # Генерация ключа для AES
-            key = os.urandom(16)  # 128-битный ключ
+            aes_key = generator(encryption_method)
             return JsonResponse({
-                'method': 'aes',
-                'key': base64.b64encode(key).decode()  # Кодируем ключ в base64 для передачи
+                'method': encryption_method,
+                'status': "aes_key generated successfully",
             })
 
-        elif encryption_method == 'dsa':
+        elif encryption_method == 'rsa':
             # Генерация ключей для DSA
-            private_key = dsa.generate_private_key(
-                key_size=2048,  # Размер ключа DSA (можно использовать 1024, 2048 или 3072)
-                backend=default_backend()
-            )
-            public_key = private_key.public_key()
-
-            # Сериализация ключей в PEM формат
-
-            pem_private = private_key.private_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PrivateFormat.TraditionalOpenSSL,
-                encryption_algorithm=serialization.NoEncryption()  # Без шифрования
-            )
-            pem_public = public_key.public_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PublicFormat.SubjectPublicKeyInfo
-            )
+            model, public_key, private_key = generate_rsa_keys()
             return JsonResponse({
-                'method': 'dsa',
-                'private_key': pem_private.decode(),
-                'public_key': pem_public.decode()
-
+                'method': encryption_method,
+                'status': "rsa_key generated successfully",
             })
 
     else:
@@ -160,12 +145,10 @@ def accept_msg(request):
 def encrypt_and_send(request):
     global model, public_key, caesar_key, aes_key
     if request.method == 'POST':
-        data = json.loads(request.body)
-
-        message = data.get('message')
-        method = data.get('method')
+        message = request.POST.get('message')
+        method = request.POST.get('method')
         receiver_url = 'http://localhost:8000/api/accept_msg/'
-
+        data = {}
         if method == 'rsa':
             if not public_key:
                 return JsonResponse({
@@ -280,34 +263,36 @@ def get_encrypted_msg(request):
 
 
 @csrf_exempt
-def send_public_key(request):
+def send_encrypted_msg(request):
+    global model, public_key, caesar_key, aes_key
     if request.method == 'POST':
-        encryption_method = request.POST.get('method')
+        message = request.POST.get('message')
+        method = request.POST.get('method')
+        receiver_url = 'http://localhost:8000/api/get_encrypted_msg/'
         data = {}
-        if encryption_method == 'rsa':
-            public_key, private_key = generator(encryption_method)
-            data['key'] = public_key
+        data['message'] = message
+        data['method'] = method
+        print(message, "message", method, "method")
+        if method == 'rsa':
+            response = requests.post(receiver_url, json=data)
+            return JsonResponse({
+                'status': 'Success',
+                'data': data,
+                'receiver_response': response.json()
+            })
+        if method == 'caesar':
+            response = requests.post(receiver_url, json=data)
+            return JsonResponse({
+                'status': 'Success',
+                'data': data,
+                'receiver_response': response.json()
+            })
+        elif method == 'aes':
+            response = requests.post(receiver_url, json=data)
+            return JsonResponse({
+                'status': 'Success',
+                'data': data,
+                'receiver_response': response.json()
+            })
         else:
-            data['key'] = generator(encryption_method)
-
-        # URL второго проекта (Receiver)
-        receiver_url = 'http://localhost:8001/api/get_public_key/'  # Порт, на котором работает Receiver
-
-        data['encryption_method'] = encryption_method
-
-        key = data['key']
-        # Отправка POST-запроса
-
-        response = requests.post(receiver_url, json=data)
-        if response.status_code == 200:
-            try:
-                response_data = response.json()
-            except ValueError:
-                return JsonResponse({'error': 'Response is not valid JSON'}, status=500)
-
-            return JsonResponse({'status': 'Data sent', 'response': response_data})
-        else:
-            return JsonResponse({'error': f'Response from Receiver: {response.status_code}, {response.text}'},
-                                status=500)
-
-    return JsonResponse({'error': 'Invalid request'}, status=400)
+            return JsonResponse({'error': 'Unknown method'}, status=400)

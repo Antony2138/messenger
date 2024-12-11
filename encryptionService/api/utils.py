@@ -5,8 +5,7 @@ from cryptography.hazmat.primitives.asymmetric import dsa
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 import random
-from Crypto.Util.Padding import pad, unpad
-from Crypto.Cipher import AES
+
 import random
 from gmpy2 import is_prime, mpz
 from sympy import isprime
